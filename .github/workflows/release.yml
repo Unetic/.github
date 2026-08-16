@@ -16,8 +16,11 @@ permissions:
 jobs:
   version:
     runs-on: ubuntu-24.04
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out repository
+        uses: actions/checkout@v4
+
       - name: Verify tag matches project version
         env:
           BUILD_KIND: ${{ inputs.build-kind }}
@@ -28,6 +31,7 @@ jobs:
           else
             version=$(node -p "require('./package.json').version")
           fi
+
           test "$TAG" = "v$version"
 
   rust-ci:
@@ -54,11 +58,14 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Download APK
+        uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
+
       - name: Publish APK to GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

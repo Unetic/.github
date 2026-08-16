@@ -40,18 +40,24 @@ permissions:
 jobs:
   package:
     runs-on: ubuntu-24.04
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         if: inputs.build-kind == 'web'
         with:
           node-version: "24"
           cache: npm
+
       - name: Build web assets
         if: inputs.build-kind == 'web'
         run: |
           npm ci
           npm run build
+
       - name: Download pinned OpenWrt SDK
         env:
           SDK_FILE: ${{ inputs.sdk-file }}
@@ -60,11 +66,21 @@ jobs:
         run: |
           curl --fail --location --output "$RUNNER_TEMP/$SDK_FILE" "$SDK_URL/$SDK_FILE"
           echo "$SDK_SHA256  $RUNNER_TEMP/$SDK_FILE" | sha256sum --check
+
           mkdir "$RUNNER_TEMP/openwrt-sdk"
-          tar --zstd --extract --file "$RUNNER_TEMP/$SDK_FILE" --directory "$RUNNER_TEMP/openwrt-sdk" --strip-components=1
+          tar --zstd \
+            --extract \
+            --file "$RUNNER_TEMP/$SDK_FILE" \
+            --directory "$RUNNER_TEMP/openwrt-sdk" \
+            --strip-components=1
+
       - name: Install Rust target
         if: inputs.build-kind == 'rust'
-        run: rustup toolchain install "${{ inputs.rust-version }}" --profile minimal --target "${{ inputs.rust-target }}"
+        run: |
+          rustup toolchain install "${{ inputs.rust-version }}" \
+            --profile minimal \
+            --target "${{ inputs.rust-target }}"
+
       - name: Cross-build Rust binary
         if: inputs.build-kind == 'rust'
         env:
@@ -77,29 +93,37 @@ jobs:
           cargo_env="CARGO_TARGET_$(echo "$RUST_TARGET" | tr '[:lower:]-' '[:upper:]_')_LINKER"
           export "$cargo_env=$linker"
           export RUSTFLAGS="-C target-feature=-crt-static"
+
           cargo "+${{ inputs.rust-version }}" build --locked --release --target "$RUST_TARGET"
           install -m 755 "target/$RUST_TARGET/release/$PACKAGE_NAME" "$RUNNER_TEMP/openwrt-binary"
+
       - name: Prepare package source
         run: |
           sdk="$RUNNER_TEMP/openwrt-sdk"
           mkdir -p "$sdk/package/${{ inputs.package-name }}/source"
           cp -R openwrt/. "$sdk/package/${{ inputs.package-name }}/"
+
           tar --exclude=.git --exclude=node_modules --exclude=target --exclude=openwrt --exclude=dist \
             -cf - . | tar -xf - -C "$sdk/package/${{ inputs.package-name }}/source"
+
           if [ "${{ inputs.build-kind }}" = web ]; then
             cp -R dist "$sdk/package/${{ inputs.package-name }}/source/"
           else
             cp "$RUNNER_TEMP/openwrt-binary" "$sdk/package/${{ inputs.package-name }}/source/"
           fi
+
       - name: Build APK
         working-directory: ${{ runner.temp }}/openwrt-sdk
         run: |
           make defconfig
           make "package/${{ inputs.package-name }}/compile" V=s
+
           mkdir "$RUNNER_TEMP/artifacts"
           find bin -type f -name '${{ inputs.package-name }}-*.apk' -exec cp {} "$RUNNER_TEMP/artifacts/" \;
           test -n "$(find "$RUNNER_TEMP/artifacts" -type f -name '*.apk' -print -quit)"
-      - uses: actions/upload-artifact@v4
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.package-name }}-${{ inputs.openwrt-version }}-${{ inputs.openwrt-target }}-${{ inputs.openwrt-subtarget }}
           path: ${{ runner.temp }}/artifacts/*.apk
