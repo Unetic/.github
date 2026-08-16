@@ -26,7 +26,7 @@ on:
         default: 0c8df0151a1e88feb7c03d694d61f6a18d51872815b7c811d76e2b77504d5e9c
       rust-version:
         type: string
-        default: "1.88"
+        default: "1.88.0"
       rust-target:
         type: string
         default: x86_64-unknown-linux-musl
@@ -39,7 +39,7 @@ permissions:
 
 jobs:
   package:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

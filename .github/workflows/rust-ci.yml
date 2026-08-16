@@ -5,14 +5,14 @@ on:
     inputs:
       rust-version:
         type: string
-        default: "1.88"
+        default: "1.88.0"
 
 permissions:
   contents: read
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - run: rustup toolchain install "${{ inputs.rust-version }}" --profile minimal --component clippy,rustfmt
