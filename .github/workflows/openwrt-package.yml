@@ -33,21 +33,6 @@ on:
       toolchain-prefix:
         type: string
         default: x86_64-openwrt-linux-musl
-      deploy:
-        type: boolean
-        default: false
-      service-name:
-        type: string
-        default: ""
-    secrets:
-      OPENWRT_HOST:
-        required: false
-      OPENWRT_USER:
-        required: false
-      OPENWRT_SSH_KEY:
-        required: false
-      OPENWRT_KNOWN_HOSTS:
-        required: false
 
 permissions:
   contents: read
@@ -119,41 +104,3 @@ jobs:
           name: ${{ inputs.package-name }}-${{ inputs.openwrt-version }}-${{ inputs.openwrt-target }}-${{ inputs.openwrt-subtarget }}
           path: ${{ runner.temp }}/artifacts/*.apk
           if-no-files-found: error
-
-  deploy:
-    if: inputs.deploy && github.ref == 'refs/heads/main'
-    needs: package
-    runs-on: [self-hosted, unetic-deploy]
-    environment: development
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: ${{ inputs.package-name }}-${{ inputs.openwrt-version }}-${{ inputs.openwrt-target }}-${{ inputs.openwrt-subtarget }}
-          path: packages
-      - name: Install package on router
-        env:
-          OPENWRT_HOST: ${{ secrets.OPENWRT_HOST }}
-          OPENWRT_USER: ${{ secrets.OPENWRT_USER }}
-          OPENWRT_SSH_KEY: ${{ secrets.OPENWRT_SSH_KEY }}
-          OPENWRT_KNOWN_HOSTS: ${{ secrets.OPENWRT_KNOWN_HOSTS }}
-          SERVICE_NAME: ${{ inputs.service-name }}
-        run: |
-          test -n "$OPENWRT_HOST"
-          test -n "$OPENWRT_USER"
-          test -n "$OPENWRT_SSH_KEY"
-          test -n "$OPENWRT_KNOWN_HOSTS"
-          install -m 600 /dev/null "$RUNNER_TEMP/unetic-router-key"
-          printf '%s\n' "$OPENWRT_SSH_KEY" > "$RUNNER_TEMP/unetic-router-key"
-          printf '%s\n' "$OPENWRT_KNOWN_HOSTS" > "$RUNNER_TEMP/unetic-known-hosts"
-          ssh_options=(-i "$RUNNER_TEMP/unetic-router-key" -o "UserKnownHostsFile=$RUNNER_TEMP/unetic-known-hosts")
-          package=$(find packages -type f -name '*.apk' -print -quit)
-          remote="/tmp/$(basename "$package")"
-          scp "${ssh_options[@]}" "$package" "$OPENWRT_USER@$OPENWRT_HOST:$remote"
-          ssh "${ssh_options[@]}" "$OPENWRT_USER@$OPENWRT_HOST" sh -s -- "$remote" <<'EOF'
-          remote=$1
-          trap 'rm -f "$remote"' EXIT
-          apk --allow-untrusted add "$remote"
-          EOF
-          if [ -n "$SERVICE_NAME" ]; then
-            ssh "${ssh_options[@]}" "$OPENWRT_USER@$OPENWRT_HOST" service "$SERVICE_NAME" restart
-          fi
