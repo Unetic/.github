@@ -1,0 +1,159 @@
+name: OpenWrt package
+
+on:
+  workflow_call:
+    inputs:
+      package-name:
+        required: true
+        type: string
+      build-kind:
+        required: true
+        type: string
+      openwrt-version:
+        type: string
+        default: "25.12.5"
+      openwrt-target:
+        type: string
+        default: x86
+      openwrt-subtarget:
+        type: string
+        default: "64"
+      sdk-file:
+        type: string
+        default: openwrt-sdk-25.12.5-x86-64_gcc-14.3.0_musl.Linux-x86_64.tar.zst
+      sdk-sha256:
+        type: string
+        default: 0c8df0151a1e88feb7c03d694d61f6a18d51872815b7c811d76e2b77504d5e9c
+      rust-version:
+        type: string
+        default: "1.88"
+      rust-target:
+        type: string
+        default: x86_64-unknown-linux-musl
+      toolchain-prefix:
+        type: string
+        default: x86_64-openwrt-linux-musl
+      deploy:
+        type: boolean
+        default: false
+      service-name:
+        type: string
+        default: ""
+    secrets:
+      OPENWRT_HOST:
+        required: false
+      OPENWRT_USER:
+        required: false
+      OPENWRT_SSH_KEY:
+        required: false
+      OPENWRT_KNOWN_HOSTS:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        if: inputs.build-kind == 'web'
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Build web assets
+        if: inputs.build-kind == 'web'
+        run: |
+          npm ci
+          npm run build
+      - name: Download pinned OpenWrt SDK
+        env:
+          SDK_FILE: ${{ inputs.sdk-file }}
+          SDK_SHA256: ${{ inputs.sdk-sha256 }}
+          SDK_URL: https://downloads.openwrt.org/releases/${{ inputs.openwrt-version }}/targets/${{ inputs.openwrt-target }}/${{ inputs.openwrt-subtarget }}
+        run: |
+          curl --fail --location --output "$RUNNER_TEMP/$SDK_FILE" "$SDK_URL/$SDK_FILE"
+          echo "$SDK_SHA256  $RUNNER_TEMP/$SDK_FILE" | sha256sum --check
+          mkdir "$RUNNER_TEMP/openwrt-sdk"
+          tar --zstd --extract --file "$RUNNER_TEMP/$SDK_FILE" --directory "$RUNNER_TEMP/openwrt-sdk" --strip-components=1
+      - name: Install Rust target
+        if: inputs.build-kind == 'rust'
+        run: rustup toolchain install "${{ inputs.rust-version }}" --profile minimal --target "${{ inputs.rust-target }}"
+      - name: Cross-build Rust binary
+        if: inputs.build-kind == 'rust'
+        env:
+          PACKAGE_NAME: ${{ inputs.package-name }}
+          RUST_TARGET: ${{ inputs.rust-target }}
+          TOOLCHAIN_PREFIX: ${{ inputs.toolchain-prefix }}
+        run: |
+          linker=$(find "$RUNNER_TEMP/openwrt-sdk/staging_dir" -type f -name "$TOOLCHAIN_PREFIX-gcc" -print -quit)
+          test -n "$linker"
+          cargo_env="CARGO_TARGET_$(echo "$RUST_TARGET" | tr '[:lower:]-' '[:upper:]_')_LINKER"
+          export "$cargo_env=$linker"
+          export RUSTFLAGS="-C target-feature=-crt-static"
+          cargo "+${{ inputs.rust-version }}" build --locked --release --target "$RUST_TARGET"
+          install -m 755 "target/$RUST_TARGET/release/$PACKAGE_NAME" "$RUNNER_TEMP/openwrt-binary"
+      - name: Prepare package source
+        run: |
+          sdk="$RUNNER_TEMP/openwrt-sdk"
+          mkdir -p "$sdk/package/${{ inputs.package-name }}/source"
+          cp -R openwrt/. "$sdk/package/${{ inputs.package-name }}/"
+          tar --exclude=.git --exclude=node_modules --exclude=target --exclude=openwrt --exclude=dist \
+            -cf - . | tar -xf - -C "$sdk/package/${{ inputs.package-name }}/source"
+          if [ "${{ inputs.build-kind }}" = web ]; then
+            cp -R dist "$sdk/package/${{ inputs.package-name }}/source/"
+          else
+            cp "$RUNNER_TEMP/openwrt-binary" "$sdk/package/${{ inputs.package-name }}/source/"
+          fi
+      - name: Build APK
+        working-directory: ${{ runner.temp }}/openwrt-sdk
+        run: |
+          make defconfig
+          make "package/${{ inputs.package-name }}/compile" V=s
+          mkdir "$RUNNER_TEMP/artifacts"
+          find bin -type f -name '${{ inputs.package-name }}-*.apk' -exec cp {} "$RUNNER_TEMP/artifacts/" \;
+          test -n "$(find "$RUNNER_TEMP/artifacts" -type f -name '*.apk' -print -quit)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.package-name }}-${{ inputs.openwrt-version }}-${{ inputs.openwrt-target }}-${{ inputs.openwrt-subtarget }}
+          path: ${{ runner.temp }}/artifacts/*.apk
+          if-no-files-found: error
+
+  deploy:
+    if: inputs.deploy && github.ref == 'refs/heads/main'
+    needs: package
+    runs-on: [self-hosted, unetic-deploy]
+    environment: development
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.package-name }}-${{ inputs.openwrt-version }}-${{ inputs.openwrt-target }}-${{ inputs.openwrt-subtarget }}
+          path: packages
+      - name: Install package on router
+        env:
+          OPENWRT_HOST: ${{ secrets.OPENWRT_HOST }}
+          OPENWRT_USER: ${{ secrets.OPENWRT_USER }}
+          OPENWRT_SSH_KEY: ${{ secrets.OPENWRT_SSH_KEY }}
+          OPENWRT_KNOWN_HOSTS: ${{ secrets.OPENWRT_KNOWN_HOSTS }}
+          SERVICE_NAME: ${{ inputs.service-name }}
+        run: |
+          test -n "$OPENWRT_HOST"
+          test -n "$OPENWRT_USER"
+          test -n "$OPENWRT_SSH_KEY"
+          test -n "$OPENWRT_KNOWN_HOSTS"
+          install -m 600 /dev/null "$RUNNER_TEMP/unetic-router-key"
+          printf '%s\n' "$OPENWRT_SSH_KEY" > "$RUNNER_TEMP/unetic-router-key"
+          printf '%s\n' "$OPENWRT_KNOWN_HOSTS" > "$RUNNER_TEMP/unetic-known-hosts"
+          ssh_options=(-i "$RUNNER_TEMP/unetic-router-key" -o "UserKnownHostsFile=$RUNNER_TEMP/unetic-known-hosts")
+          package=$(find packages -type f -name '*.apk' -print -quit)
+          remote="/tmp/$(basename "$package")"
+          scp "${ssh_options[@]}" "$package" "$OPENWRT_USER@$OPENWRT_HOST:$remote"
+          ssh "${ssh_options[@]}" "$OPENWRT_USER@$OPENWRT_HOST" sh -s -- "$remote" <<'EOF'
+          remote=$1
+          trap 'rm -f "$remote"' EXIT
+          apk --allow-untrusted add "$remote"
+          EOF
+          if [ -n "$SERVICE_NAME" ]; then
+            ssh "${ssh_options[@]}" "$OPENWRT_USER@$OPENWRT_HOST" service "$SERVICE_NAME" restart
+          fi

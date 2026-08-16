@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  workflow_call:
+    inputs:
+      package-name:
+        required: true
+        type: string
+      build-kind:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify tag matches project version
+        env:
+          BUILD_KIND: ${{ inputs.build-kind }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if [ "$BUILD_KIND" = rust ]; then
+            version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)
+          else
+            version=$(node -p "require('./package.json').version")
+          fi
+          test "$TAG" = "v$version"
+
+  rust-ci:
+    needs: version
+    if: inputs.build-kind == 'rust'
+    uses: Unetic/.github/.github/workflows/rust-ci.yml@main
+
+  web-ci:
+    needs: version
+    if: inputs.build-kind == 'web'
+    uses: Unetic/.github/.github/workflows/web-ci.yml@main
+
+  package:
+    needs: [version, rust-ci, web-ci]
+    if: always() && !failure() && !cancelled()
+    uses: Unetic/.github/.github/workflows/openwrt-package.yml@main
+    with:
+      package-name: ${{ inputs.package-name }}
+      build-kind: ${{ inputs.build-kind }}
+
+  release:
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" artifacts/*.apk --generate-notes --verify-tag
