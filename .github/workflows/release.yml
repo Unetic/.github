@@ -50,6 +50,7 @@ jobs:
 
   release:
     needs: package
+    if: always() && needs.package.result == 'success'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
