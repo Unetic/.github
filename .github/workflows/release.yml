@@ -3,9 +3,6 @@ name: Release
 on:
   workflow_call:
     inputs:
-      package-name:
-        required: true
-        type: string
       build-kind:
         required: true
         type: string
@@ -34,49 +31,21 @@ jobs:
 
           test "$TAG" = "v$version"
 
-  rust-ci:
-    needs: version
-    if: inputs.build-kind == 'rust'
-    uses: Unetic/.github/.github/workflows/rust-ci.yml@main
-
-  web-ci:
-    needs: version
-    if: inputs.build-kind == 'web'
-    uses: Unetic/.github/.github/workflows/web-ci.yml@main
-
-  package:
-    needs: [version, rust-ci, web-ci]
-    if: always() && !failure() && !cancelled()
-    uses: Unetic/.github/.github/workflows/openwrt-package.yml@main
-    with:
-      package-name: ${{ inputs.package-name }}
-      build-kind: ${{ inputs.build-kind }}
-
   release:
-    needs: package
-    if: always() && needs.package.result == 'success'
+    needs: version
     runs-on: ubuntu-24.04
     permissions:
       contents: write
 
     steps:
-      - name: Download APK
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          merge-multiple: true
-
-      - name: Publish APK to GitHub release
+      - name: Publish source release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
         run: |
-          apk_files=(artifacts/*.apk)
-          test -e "${apk_files[0]}"
-
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "${apk_files[@]}" --clobber
+            gh release edit "$TAG" --verify-tag
           else
-            gh release create "$TAG" "${apk_files[@]}" --generate-notes --verify-tag
+            gh release create "$TAG" --generate-notes --verify-tag
           fi
