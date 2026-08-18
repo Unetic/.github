@@ -52,8 +52,8 @@ case "$ARCH" in
         ;;
 esac
 
-wget -O /etc/apk/keys/unetic-apk-public.pem \
-    https://unetic.github.io/packages/keys/unetic-apk-public.pem
+wget -O /etc/apk/keys/unetic-apk-v1.pem \
+    https://unetic.github.io/packages/keys/unetic-apk-v1.pem
 
 FEED="https://unetic.github.io/packages/25.12.5/$ARCH/packages.adb"
 
