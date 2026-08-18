@@ -1,32 +1,7 @@
-# Unetic GitHub
+# Unetic GitHub metadata
 
-Shared GitHub Actions workflows for the
-[Unetic](https://github.com/Unetic) repositories.
+This repository contains organization-level GitHub metadata only.
 
-This repository keeps common CI and OpenWrt packaging logic in one place so
-individual projects only need small workflow wrappers.
+Reusable CI/CD workflows live in [`Unetic/packages`](https://github.com/Unetic/packages/tree/main/.github/workflows), because `packages` is the single production deployment owner for Unetic.
 
-## Workflows
-
-### Rust CI
-
-Used by `unetic-core` and `unetic-cli`.
-
-Runs formatting checks, Clippy, tests and release builds.
-
-### Web CI
-
-Used by `unetic-web`.
-
-Runs dependency installation, formatting checks, tests and the production Angular build.
-
-### OpenWrt packaging
-
-Reusable workflow for building OpenWrt APK artifacts with official OpenWrt SDKs.
-
-Production signed package repositories are published separately by
-[`Unetic/packages`](https://github.com/Unetic/packages).
-
-## License
-
-GPL-2.0-only.
+There must be no files under `.github/workflows/` in this repository.
